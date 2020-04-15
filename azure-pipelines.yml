@@ -9,7 +9,7 @@ resources:
 - repo: self
 
 variables:
-  tag: '$(Build.BuildId)'
+  tag: 'iot-manager'
 
 stages:
 - stage: Build
@@ -24,6 +24,7 @@ stages:
       displayName: Build an image
       inputs:
         command: build
-        dockerfile: './azure-iot-platform-dotnet/src/services'
+        dockerfile: './azure-iot-platform-dotnet/src/services/Dockerfile'
         tags: |
           $(tag)
+          arguments:  SERVICE_NAME=iothub-manager,WEB_SERVICE_ASSEMBLY_NAME=Mmm.Iot.IoTHubManager.WebService.dll,$(APP_CONFIGURATION_CONNECTION_STRING)
