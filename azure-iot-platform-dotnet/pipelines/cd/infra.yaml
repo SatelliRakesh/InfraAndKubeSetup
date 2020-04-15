@@ -1,0 +1,119 @@
+trigger: none
+pr: none
+pool:
+  vmImage: ubuntu-latest
+variables:
+  platformOperationServiceConnection: 3M-CRSLBL01-CRSL-Digital-Platforms-Bluebird
+  locationName: centralus
+stages:
+  - stage: crslDev
+    displayName: CRSL dev
+    dependsOn: []
+    jobs:
+      - template: ../templates/jobs-deploy-infra.yaml
+        parameters:
+          subscriptionName: 3M-CRSLAD16-BBIoTP-DEV
+          locationName: $(locationName)
+          environmentName: IoT_CRSL_Environment_Dev
+          subscriptionId: c36fb2f8-f98d-40d0-90a9-d65e93acb428
+          applicationCode: crsliot
+          applicationShortCode: crsl
+          environmentCategory: dev
+          platformOperationServiceConnection: $(platformOperationServiceConnection)
+          k8sVersion: 1.16.4
+
+  - stage: crslQa
+    displayName: CRSL QA
+    dependsOn: []
+    jobs:
+      - template: ../templates/jobs-deploy-infra.yaml
+        parameters:
+          subscriptionName: 3M-CRSLAD17-BBIoTP-QA
+          locationName: $(locationName)
+          environmentName: IoT_CRSL_Environment_QA
+          subscriptionId: f27c7c03-1ea8-49b8-9878-106e434b8a23
+          applicationCode: crsliot
+          applicationShortCode: crsl
+          environmentCategory: qa
+          platformOperationServiceConnection: $(platformOperationServiceConnection)
+          k8sVersion: 1.15.7
+
+  - stage: crslWkbnch
+    displayName: CRSL workbench
+    dependsOn: []
+    jobs:
+      - template: ../templates/jobs-deploy-infra.yaml
+        parameters:
+          subscriptionName: 3M-CRSLAD19-BBIoTP-Prod
+          locationName: $(locationName)
+          environmentName: IoT_CRSL_Environment_WKBNCH
+          subscriptionId: dcb37438-95ca-4a68-812d-39ce0d591df2
+          applicationCode: crsliot
+          applicationShortCode: crsl
+          environmentCategory: wkbnch
+          platformOperationServiceConnection: $(platformOperationServiceConnection)
+          k8sVersion: 1.15.7
+
+  - stage: chimDev
+    displayName: CHIM dev
+    dependsOn: []
+    jobs:
+      - template: ../templates/jobs-deploy-infra.yaml
+        parameters:
+          subscriptionName: 3M-ACTAIR01-CHIMSMART-Dev
+          locationName: $(locationName)
+          environmentName: IoT_CHIM_Environment_DEV
+          subscriptionId: 28299656-8110-4dc4-a33f-82a6cc3d05c2
+          applicationCode: chimiot
+          applicationShortCode: chim
+          environmentCategory: dev
+          platformOperationServiceConnection: $(platformOperationServiceConnection)
+          k8sVersion: 1.15.7
+
+  - stage: chimQa
+    displayName: CHIM QA
+    dependsOn: []
+    jobs:
+      - template: ../templates/jobs-deploy-infra.yaml
+        parameters:
+          subscriptionName: 3M-ACTAIR02-CHIMSMART-QA
+          locationName: $(locationName)
+          environmentName: IoT_CHIM_Environment_QA
+          subscriptionId: 30975220-85e1-4769-8bc1-4542ec8569a0
+          applicationCode: chimiot
+          applicationShortCode: chim
+          environmentCategory: qa
+          platformOperationServiceConnection: $(platformOperationServiceConnection)
+          k8sVersion: 1.15.7
+
+  - stage: psdDev
+    displayName: PSD dev
+    dependsOn: []
+    jobs:
+      - template: ../templates/jobs-deploy-infra.yaml
+        parameters:
+          subscriptionName: 3M-PSD-Dev
+          locationName: $(locationName)
+          subscriptionId: 1d0a4e20-e44d-43b5-97b0-9b577f5bf048
+          applicationCode: psdiot
+          applicationShortCode: psd
+          environmentCategory: dev
+          environmentName: IoT_PSD_Environment_DEV
+          platformOperationServiceConnection: $(platformOperationServiceConnection)
+          k8sVersion: 1.15.7
+
+  - stage: emdDev
+    displayName: EMD dev
+    dependsOn: []
+    jobs:
+      - template: ../templates/jobs-deploy-infra.yaml
+        parameters:
+          subscriptionName: 3M-UDAH02-SpartanIotHub-Dev
+          locationName: $(locationName)
+          subscriptionId: 191495e8-b878-4140-85eb-aae73a7119cd
+          applicationCode: emdiot
+          applicationShortCode: emd
+          environmentCategory: dev
+          environmentName: IoT_EMD_Environment_DEV
+          platformOperationServiceConnection: $(platformOperationServiceConnection)
+          k8sVersion: 1.15.7

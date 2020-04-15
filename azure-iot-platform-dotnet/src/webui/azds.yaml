@@ -1,0 +1,38 @@
+kind: helm-release
+apiVersion: 1.1
+build:
+  context: .
+  dockerfile: Dockerfile
+install:
+  chart: charts/webui
+  values:
+  - values.dev.yaml?
+  - secrets.dev.yaml?
+  set:
+    replicaCount: 1
+    image:
+      repository: webui
+      tag: $(tag)
+      pullPolicy: Never
+    ingress:
+      annotations:
+        kubernetes.io/ingress.class: traefik-azds
+      hosts:
+      # This expands to form the service's public URL: [space.s.][rootSpace.]webui.<random suffix>.<region>.azds.io
+      # Customize the public URL by changing the 'webui' text between the $(rootSpacePrefix) and $(hostSuffix) tokens
+      # For more information see https://aka.ms/devspaces/routing
+      - $(spacePrefix)$(rootSpacePrefix)webui$(hostSuffix)
+    secretsRef:
+      - AppConfigurationConnectionString
+
+configurations:
+  develop:
+    build:
+      useGitIgnore: true
+      syncTarget: /src
+    container:
+      sync:
+      - "!**/package.json"
+      - "!**/*.{sln,csproj,sh}"
+      iterate:
+        processesToKill: [node]

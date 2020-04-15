@@ -1,0 +1,6 @@
+secrets:
+  globalsecrets:
+    AppConfigurationConnectionString:
+
+ingress:
+  class:

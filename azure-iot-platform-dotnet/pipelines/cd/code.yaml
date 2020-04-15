@@ -1,0 +1,123 @@
+trigger: none
+pr: none
+resources:
+  pipelines:
+    - pipeline: test
+      source: azure-iot-services-dotnet.ci.test
+      trigger:
+        branches:
+          - master
+pool:
+  vmImage: ubuntu-latest
+variables:
+  masterBranch: refs/heads/master/
+  sourceBranch: $[coalesce(variables.resources.pipeline.test.sourceBranch, variables.Build.SourceBranch)]
+  imageTag: $[coalesce(variables.resources.pipeline.test.runID, 'latest')]
+stages:
+  - stage: printPipelineResourceVariables
+    displayName: Print pipeline resource variables
+    jobs:
+      - job: printPipelineResourceVariables
+        displayName: Print pipeline resource variables
+        steps:
+          - template: ../templates/print-pipeline-resource-variables.yaml
+            parameters:
+              pipelineResourceName: test
+
+  - stage: crslDev
+    displayName: CRSL dev
+    dependsOn: []
+#     condition: or(eq(variables['resources.pipeline.test.sourceBranch'], variables['masterBranch']), eq(variables['resources.pipeline.test.sourceBranch'], Null), eq(variables['resources.pipeline.test.sourceBranch'], ''))
+    jobs:
+      - template: ../templates/jobs-deploy-code.yaml
+        parameters:
+          environmentName: IoT_CRSL_Environment_Dev
+          subscriptionName: 3M-CRSLAD16-BBIoTP-DEV
+          applicationCode: crsliot
+          applicationShortCode: crsl
+          environmentCategory: dev
+          imageTag: $(imageTag)
+
+  - stage: crslQa
+    displayName: CRSL QA
+    dependsOn: []
+#     condition: or(eq(variables['resources.pipeline.test.sourceBranch'], variables['masterBranch']), eq(variables['resources.pipeline.test.sourceBranch'], Null), eq(variables['resources.pipeline.test.sourceBranch'], ''))
+    jobs:
+      - template: ../templates/jobs-deploy-code.yaml
+        parameters:
+          environmentName: IoT_CRSL_Environment_QA
+          subscriptionName: 3M-CRSLAD17-BBIoTP-QA
+          applicationCode: crsliot
+          applicationShortCode: crsl
+          environmentCategory: qa
+          imageTag: $(imageTag)
+
+  - stage: crslWkbnch
+    displayName: CRSL workbench
+    dependsOn: []
+#     condition: or(eq(variables['resources.pipeline.test.sourceBranch'], variables['masterBranch']), eq(variables['resources.pipeline.test.sourceBranch'], Null), eq(variables['resources.pipeline.test.sourceBranch'], ''))
+    jobs:
+      - template: ../templates/jobs-deploy-code.yaml
+        parameters:
+          environmentName: IoT_CRSL_Environment_WKBNCH
+          subscriptionName: 3M-CRSLAD19-BBIoTP-Prod
+          applicationCode: crsliot
+          applicationShortCode: crsl
+          environmentCategory: wkbnch
+          imageTag: $(imageTag)
+
+  - stage: chimDev
+    displayName: CHIM dev
+    dependsOn: []
+#     condition: or(eq(variables['resources.pipeline.test.sourceBranch'], variables['masterBranch']), eq(variables['resources.pipeline.test.sourceBranch'], Null), eq(variables['resources.pipeline.test.sourceBranch'], ''))
+    jobs:
+      - template: ../templates/jobs-deploy-code.yaml
+        parameters:
+          environmentName: IoT_CHIM_Environment_DEV
+          subscriptionName: 3M-ACTAIR01-CHIMSMART-Dev
+          applicationCode: chimiot
+          applicationShortCode: chim
+          environmentCategory: dev
+          imageTag: $(imageTag)
+
+  - stage: chimQa
+    displayName: CHIM QA
+    dependsOn: []
+#     condition: or(eq(variables['resources.pipeline.test.sourceBranch'], variables['masterBranch']), eq(variables['resources.pipeline.test.sourceBranch'], Null), eq(variables['resources.pipeline.test.sourceBranch'], ''))
+    jobs:
+      - template: ../templates/jobs-deploy-code.yaml
+        parameters:
+          environmentName: IoT_CHIM_Environment_QA
+          subscriptionName: 3M-ACTAIR02-CHIMSMART-QA
+          applicationCode: chimiot
+          applicationShortCode: chim
+          environmentCategory: qa
+          imageTag: $(imageTag)
+
+  - stage: psdDev
+    displayName: PSD dev
+    dependsOn: []
+#     condition: or(eq(variables['resources.pipeline.test.sourceBranch'], variables['masterBranch']), eq(variables['resources.pipeline.test.sourceBranch'], Null), eq(variables['resources.pipeline.test.sourceBranch'], ''))
+    jobs:
+      - template: ../templates/jobs-deploy-code.yaml
+        parameters:
+          environmentName: IoT_PSD_Environment_DEV
+          subscriptionName: 3M-PSD-Dev
+          applicationCode: psdiot
+          applicationShortCode: psd
+          environmentCategory: dev
+          imageTag: $(imageTag)
+
+  - stage: emdDev
+    displayName: EMD dev
+    dependsOn: []
+#     condition: or(eq(variables['resources.pipeline.test.sourceBranch'], variables['masterBranch']), eq(variables['resources.pipeline.test.sourceBranch'], Null), eq(variables['resources.pipeline.test.sourceBranch'], ''))
+    jobs:
+      - template: ../templates/jobs-deploy-code.yaml
+        parameters:
+          environmentName: IoT_EMD_Environment_DEV
+          subscriptionName: 3M-UDAH02-SpartanIotHub-Dev
+          applicationCode: emdiot
+          applicationShortCode: emd
+          environmentCategory: dev
+          imageTag: $(imageTag)

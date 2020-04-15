@@ -1,0 +1,543 @@
+trigger:
+  batch: true
+  branches:
+    include:
+      - master
+pr:
+  autoCancel: true
+  branches:
+    include:
+    - master
+schedules:
+  - cron: 0 6 * * *
+    displayName: Daily midnight (CST) build
+    branches:
+      include:
+        - master
+    always: true
+pool:
+  vmImage: ubuntu-latest
+variables:
+  - template: ../templates/variables-all.yaml
+  - name: applicationCode
+    value: crsliot
+  - name: applicationShortCode
+    value: crsl
+  - name: environmentCategory
+    value: dev
+  - name: subscriptionName
+    value: 3M-CRSLAD16-BBIoTP-Dev
+  - name: aksName
+    value: $(applicationCode)-$(aksPartialName)-$(environmentCategory)
+  - name: appConfigurationName
+    value: $(applicationCode)-$(appConfigurationPartialName)-$(environmentCategory)
+  - name: resouceGroupName
+    value: $(resourceGroupPartialName)-iot-$(applicationShortCode)-$(environmentCategory)
+  - name: storageAccountName
+    value: $(applicationCode)$(storageAccountPartialName)$(environmentCategory)
+  - name: tableStorageName
+    value: pipeline
+  - name: tableStoragePartition
+    value: test
+  - name: tableStorageRowKeyPrefix
+    value: "build-$(Build.BuildId):"
+  - name: kubernetesNamespaceWasCreatedRowKey
+    value: kubernetesNamespaceWasCreated
+  - name: serenityHelmChartWasInstalledRowKey
+    value: serenityHelmChartWasInstalled
+  - name: tableStorageAppConfigurationConnectionStringRowKey
+    value: appConfigurationConnectionString
+  - name: tableStorageClusterIpRowKey
+    value: clusterIp
+  - name: kubernetesNamespace
+    value: build-$(Build.BuildId)
+  - name: dockerfile
+    value: Dockerfile
+  - name: platformHelmChartName
+    value: mmm-iot-platform
+  - name: publishedFilesArtifactName
+    value: publishFiles
+  - name: helmInstallTimeoutInSeconds
+    value: 600
+  - name: platformHelmChartValuesFile
+    value: pipelines/ci/mmm-iot-platform-chart-values.yaml
+  - name: platformHelmChartReleaseName
+    value: build-$(Build.BuildId)
+resources:
+  repositories:
+    - repository: azure-iot-functional-tests
+      name: MMM/azure-iot-functional-tests
+      type: githubenterprise
+      endpoint: GithubMMM
+      ref: master
+stages:
+  - stage: build
+    displayName: Build
+    dependsOn: []
+    jobs:
+      - job: preBuild
+        displayName: Pre-build
+        steps:
+          - checkout: none
+
+          - task: AzureCLI@2
+            displayName: Get App Configuration connection string
+            name: getAppConfigurationConnectionString
+            inputs:
+              azureSubscription: $(subscriptionName)
+              scriptType: bash
+              scriptLocation: inlineScript
+              inlineScript: |-
+                appConfigurationConnectionString=`az appconfig credential list --name $(appConfigurationName) --resource-group $(resouceGroupName) --query "[?name=='Primary'].connectionString | [0]" --output tsv`
+                echo "##vso[task.setvariable variable=AppConfigurationConnectionString;isOutput=true]$appConfigurationConnectionString"
+                az storage entity insert --entity PartitionKey=$(tableStoragePartition) RowKey=$(tableStorageRowKeyPrefix)$(tableStorageAppConfigurationConnectionStringRowKey) Content="$appConfigurationConnectionString" --table-name $(tableStorageName) --account-name $(storageAccountName)
+
+      - job: build
+        displayName: Build
+        dependsOn:
+          - preBuild
+        variables:
+          AppConfigurationConnectionString: $[dependencies.preBuild.outputs['getAppConfigurationConnectionString.appConfigurationConnectionString']]
+        steps:
+          - checkout: self
+            displayName: Checkout repository
+
+          - script: |-
+              dotnet restore --force --no-cache --no-dependencies --packages .nuget --runtime $(dotnetProductionRuntimeId) /p:TargetLatestRuntimePatch=true
+            displayName: Restore dependencies
+
+          - script: >-
+              dotnet publish
+              --self-contained false
+              --no-restore
+              --no-dependencies
+              --configuration $(dotnetBuildConfiguration)
+              --runtime $(dotnetProductionRuntimeId)
+              /p:TargetLatestRuntimePatch=true
+            displayName: Build assemblies
+
+          - task: CopyFiles@2
+            displayName: Prepare file artifacts
+            inputs:
+              contents: |
+                *.sln
+                *.props
+                *.ruleset
+                global.json
+                .nuget/**/*
+                src/services/**/*
+                test/services/**/*
+              targetFolder: $(publishedFilesArtifactName)
+              cleanTargetFolder: true
+
+          - publish: $(publishedFilesArtifactName)
+            artifact: $(publishedFilesArtifactName)
+            displayName: Publish file artifacts
+
+  - stage: unitTest
+    displayName: Unit test
+    dependsOn:
+      - build
+    jobs:
+      - job: unitTest
+        displayName: Unit test
+        variables:
+          - name: excludeFromCodeCoverage
+            value: "[Mmm.*.Test*]*%2C[Mmm.*.WebService]*Startup%2C[Mmm.*.WebService]*Program%2C[*]Mmm.Iot.Common.Services.Config.*%2C[*]*DependencyResolution*%2C[*]Mmm.*Model*"
+        steps:
+          - checkout: none
+
+          - task: DownloadPipelineArtifact@2
+            displayName: Download artifacts
+            inputs:
+              source: current
+              artifact: $(publishedFilesArtifactName)
+              path: $(Build.SourcesDirectory)
+
+          - task: DotNetCoreCLI@2
+            displayName: Run unit tests
+            inputs:
+              command: test
+              workingDirectory: $(Build.SourcesDirectory)
+              arguments: >-
+                --no-build
+                --configuration $(dotnetBuildConfiguration)
+                --runtime $(dotnetProductionRuntimeId)
+                --logger trx
+                /p:CollectCoverage=true
+                /p:CoverletOutputFormat=cobertura
+                "/p:Exclude=\"$(excludeFromCodeCoverage)\""
+
+          - script: |-
+              dotnet tool install --tool-path ./reportgenerator-tool dotnet-reportgenerator-globaltool
+              ./reportgenerator-tool/reportgenerator -reports:**/coverage.cobertura.xml -targetdir:. -reporttypes:"Cobertura"
+            displayName: Generate coverage report
+
+          - task: PublishCodeCoverageResults@1
+            displayName: Publish test coverage
+            inputs:
+              codeCoverageTool: Cobertura
+              summaryFileLocation: Cobertura.xml
+
+  - stage: buildFrontEndContainers
+    displayName: Build front-end containers
+    dependsOn: []
+    jobs:
+      - job: buildFrontEndContainers
+        displayName: Build front-end containers
+        strategy:
+          matrix:
+            reverse-proxy:
+              serviceName: reverse-proxy
+            webui:
+              serviceName: webui
+        steps:
+          - checkout: self
+            displayName: Checkout repository
+
+          - task: Docker@2
+            displayName: Build and push container
+            inputs:
+              containerRegistry: $(dockerHubServiceConnectionName)
+              repository: $(dockerHubRepositoryName)/$(serviceName)
+              command: buildAndPush
+              dockerfile: src/$(serviceName)/$(dockerfile)
+              buildContext: src/$(serviceName)
+              tags: |-
+                $(Build.BuildId)
+
+  - stage: buildServiceContainers
+    displayName: Build service containers
+    dependsOn:
+      - build
+    jobs:
+      - job: buildServiceContainers
+        displayName: Build service containers
+        strategy:
+          matrix:
+            asa-manager:
+              serviceName: asa-manager
+            config:
+              serviceName: config
+            device-telemetry:
+              serviceName: device-telemetry
+            diagnostics:
+              serviceName: diagnostics
+            identity-gateway:
+              serviceName: identity-gateway
+            iothub-manager:
+              serviceName: iothub-manager
+            storage-adapter:
+              serviceName: storage-adapter
+            tenant-manager:
+              serviceName: tenant-manager
+        steps:
+          - checkout: none
+
+          - download: current
+            artifact: $(publishedFilesArtifactName)
+            displayName: Download artifacts
+
+          - pwsh: |-
+              $assemblyName = (Get-Content src/services/$(serviceName)/WebService/WebService.csproj | Select-String '(?<=<AssemblyName>).*(?=</AssemblyName>)').Matches[0].Value
+              $dockerfileContents = "FROM mcr.microsoft.com/dotnet/core/aspnet:$(dotnetCoreRuntimeVersion)-alpine AS base`nWORKDIR /app`nEXPOSE 80`nCOPY . .`nENTRYPOINT [`"dotnet`", `"$assemblyName.dll`"]"
+              Set-Content -Value $dockerfileContents -Path $(dockerfile) -NoNewline -Encoding utf8
+            displayName: Generate Dockerfile
+            workingDirectory: $(Pipeline.Workspace)/$(publishedFilesArtifactName)
+
+          - task: Docker@2
+            displayName: Build and push container
+            inputs:
+              containerRegistry: $(dockerHubServiceConnectionName)
+              repository: $(dockerHubRepositoryName)/$(serviceName)
+              command: buildAndPush
+              dockerfile: $(Pipeline.Workspace)/$(publishedFilesArtifactName)/$(dockerfile)
+              buildContext: $(Pipeline.Workspace)/$(publishedFilesArtifactName)/src/services/$(serviceName)/WebService/bin/$(dotnetBuildConfiguration)/netcoreapp$(dotnetCoreRuntimeVersion)/$(dotnetProductionRuntimeId)/publish
+              tags: |-
+                $(Build.BuildId)
+
+  - stage: deploy
+    displayName: Deploy
+    dependsOn:
+      - buildFrontEndContainers
+      - buildServiceContainers
+    jobs:
+      - job: getPipelineVariables
+        displayName: Get pipeline variables
+        steps:
+          - checkout: none
+
+          - task: AzureCLI@2
+            displayName: Get pipeline variables
+            name: getPipelineVariables
+            inputs:
+              azureSubscription: $(subscriptionName)
+              scriptType: bash
+              scriptLocation: inlineScript
+              inlineScript: |-
+                appConfigurationConnectionString=`az storage entity query --filter "PartitionKey eq '$(tableStoragePartition)' and RowKey eq '$(tableStorageRowKeyPrefix)$(tableStorageAppConfigurationConnectionStringRowKey)'" --select Content --query items[].Content --output tsv --table-name $(tableStorageName) --account-name $(storageAccountName)`
+                echo "##vso[task.setvariable variable=appConfigurationConnectionString;isOutput=true]$appConfigurationConnectionString"
+
+      - job: deploy
+        displayName: Deploy
+        dependsOn:
+          - getPipelineVariables
+        variables:
+          appConfigurationConnectionString: $[dependencies.getPipelineVariables.outputs['getPipelineVariables.appConfigurationConnectionString']]
+        steps:
+          - checkout: self
+            displayName: Checkout repository
+
+          - task: Kubernetes@1
+            displayName: Create namespace
+            inputs:
+              connectionType: Azure Resource Manager
+              azureSubscriptionEndpoint: $(subscriptionName)
+              azureResourceGroup: $(resouceGroupName)
+              kubernetesCluster: $(aksName)
+              command: create
+              arguments: namespace $(kubernetesNamespace)
+
+          - task: AzureCLI@2
+            displayName: Note namespace was created
+            name: noteNamespaceWasCreated
+            inputs:
+              azureSubscription: $(subscriptionName)
+              scriptType: bash
+              scriptLocation: inlineScript
+              inlineScript: |-
+                az storage entity insert --entity PartitionKey=$(tableStoragePartition) RowKey=$(tableStorageRowKeyPrefix)$(kubernetesNamespaceWasCreatedRowKey) Content="true" --table-name $(tableStorageName) --account-name $(storageAccountName)
+
+          - task: HelmInstaller@1
+            displayName: Install Helm
+            inputs:
+              helmVersionToInstall: $(helmVersion)
+
+          - task: HelmDeploy@0
+            displayName: Initialize Helm
+            inputs:
+              connectionType: Azure Resource Manager
+              azureSubscriptionEndpoint: $(subscriptionName)
+              azureResourceGroup: $(resouceGroupName)
+              kubernetesCluster: $(aksName)
+              namespace: $(kubernetesNamespace)
+              command: init
+              arguments: --force-upgrade
+
+          - script: |-
+              sed -i -e 's/replace_this/$(Build.BuildId)/g' $(platformHelmChartValuesFile)
+            displayName: Set image tag
+
+          - task: HelmDeploy@0
+            displayName: Install Serenity chart
+            inputs:
+              connectionType: Azure Resource Manager
+              azureSubscriptionEndpoint: $(subscriptionName)
+              azureResourceGroup: $(resouceGroupName)
+              kubernetesCluster: $(aksName)
+              useClusterAdmin: false
+              namespace: $(kubernetesNamespace)
+              command: install
+              chartName: charts/$(platformHelmChartName)
+              releaseName: $(platformHelmChartReleaseName)
+              updatedependency: true
+              overrideValues: secrets.globalsecrets.AppConfigurationConnectionString=$(appConfigurationConnectionString),nginx-ingress.controller.ingressClass=build-$(Build.BuildId),ingress.class=build-$(Build.BuildId)
+              valueFile: $(platformHelmChartValuesFile)
+              arguments: --timeout $(helmInstallTimeoutInSeconds)
+
+          - task: AzureCLI@2
+            displayName: Note Helm chart was installed
+            name: noteHelmChartWasInstalled
+            inputs:
+              azureSubscription: $(subscriptionName)
+              scriptType: bash
+              scriptLocation: inlineScript
+              inlineScript: |-
+                az storage entity insert --entity PartitionKey=$(tableStoragePartition) RowKey=$(tableStorageRowKeyPrefix)$(serenityHelmChartWasInstalledRowKey) Content="true" --table-name $(tableStorageName) --account-name $(storageAccountName)
+
+  - stage: functionalTest
+    displayName: Functional tests
+    dependsOn:
+      - deploy
+    jobs:
+      - job: getPipelineVariables
+        displayName: Get pipeline variables
+        dependsOn: []
+        steps:
+          - checkout: none
+
+          - task: AzureCLI@2
+            displayName: Get pipeline variables
+            name: getPipelineVariables
+            inputs:
+              azureSubscription: $(subscriptionName)
+              scriptType: bash
+              scriptLocation: inlineScript
+              inlineScript: |-
+                appConfigurationConnectionString=`az storage entity query --filter "PartitionKey eq '$(tableStoragePartition)' and RowKey eq '$(tableStorageRowKeyPrefix)$(tableStorageAppConfigurationConnectionStringRowKey)'" --select Content --query items[].Content --output tsv --table-name $(tableStorageName) --account-name $(storageAccountName)`
+                echo "##vso[task.setvariable variable=appConfigurationConnectionString;isOutput=true]$appConfigurationConnectionString"
+
+      - job: getClusterIp
+        displayName: Get cluster IP
+        dependsOn: []
+        steps:
+          - checkout: none
+
+          - task: AzureCLI@2
+            displayName: Get cluster IP
+            name: getClusterIp
+            inputs:
+              azureSubscription: $(subscriptionName)
+              scriptType: bash
+              scriptLocation: inlineScript
+              inlineScript: |-
+                az aks get-credentials --resource-group $(resouceGroupName) --name $(aksName)
+                clusterIp=`kubectl get services --namespace $(kubernetesNamespace) --selector=app=nginx-ingress,component=controller --output=jsonpath='{.items[*].status.loadBalancer.ingress[*].ip}'`
+                clusterIp="http://$clusterIp/"
+                echo $clusterIp
+                echo "##vso[task.setvariable variable=clusterIp;isOutput=true]$clusterIp"
+
+      - job: functionalTest
+        displayName: Functional test
+        dependsOn:
+          - getClusterIp
+          - getPipelineVariables
+        variables:
+          SerenityBaseUrl: $[dependencies.getClusterIp.outputs['getClusterIp.clusterIp']]
+          AppConfigurationConnectionString: $[dependencies.getPipelineVariables.outputs['getPipelineVariables.appConfigurationConnectionString']]
+        steps:
+          - checkout: azure-iot-functional-tests
+            displayName: Checkout repository
+
+          - task: DotNetCoreCLI@2
+            displayName: Run functional tests
+            inputs:
+              command: test
+              arguments: >-
+                --configuration $(dotnetBuildConfiguration)
+                --logger trx
+
+  - stage: tagImages
+    displayName: Tag images
+    dependsOn:
+      - buildFrontEndContainers
+      - buildServiceContainers
+      - unitTest
+      - functionalTest
+    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/master'))
+    jobs:
+      - job: tagImages
+        displayName: Tag images
+        strategy:
+          matrix:
+            asa-manager:
+              serviceName: asa-manager
+            config:
+              serviceName: config
+            device-telemetry:
+              serviceName: device-telemetry
+            diagnostics:
+              serviceName: diagnostics
+            identity-gateway:
+              serviceName: identity-gateway
+            iothub-manager:
+              serviceName: iothub-manager
+            reverse-proxy:
+              serviceName: reverse-proxy
+            storage-adapter:
+              serviceName: storage-adapter
+            tenant-manager:
+              serviceName: tenant-manager
+            webui:
+              serviceName: webui
+        steps:
+          - checkout: none
+
+          - task: Docker@2
+            displayName: Pull image
+            inputs:
+              containerRegistry: $(dockerHubServiceConnectionName)
+              command: pull
+              arguments: $(dockerHubRepositoryName)/$(serviceName):$(Build.BuildId)
+
+          - task: Docker@2
+            displayName: Apply 'latest' tag
+            inputs:
+              containerRegistry: $(dockerHubServiceConnectionName)
+              command: tag
+              arguments: $(dockerHubRepositoryName)/$(serviceName):$(Build.BuildId) $(dockerHubRepositoryName)/$(serviceName):latest
+
+          - task: Docker@2
+            displayName: Push image
+            inputs:
+              containerRegistry: $(dockerHubServiceConnectionName)
+              repository: $(dockerHubRepositoryName)/$(serviceName)
+              command: push
+              tags: latest
+
+  - stage: cleanup
+    displayName: Cleanup
+    dependsOn:
+      - functionalTest
+    condition: and(succeededOrFailed(), eq(variables['runCleanupStage'], 'true'))
+    jobs:
+      - job: getPipelineVariables
+        displayName: Get pipeline variables
+        dependsOn: []
+        steps:
+          - checkout: none
+
+          - task: AzureCLI@2
+            displayName: Get pipeline variables
+            name: getPipelineVariables
+            inputs:
+              azureSubscription: $(subscriptionName)
+              scriptType: bash
+              scriptLocation: inlineScript
+              inlineScript: |-
+                kubernetesNamespaceWasCreated=`az storage entity query --filter "PartitionKey eq '$(tableStoragePartition)' and RowKey eq '$(tableStorageRowKeyPrefix)$(kubernetesNamespaceWasCreatedRowKey)'" --select Content --query items[].Content --output tsv --table-name $(tableStorageName) --account-name $(storageAccountName)`
+                echo "##vso[task.setvariable variable=kubernetesNamespaceWasCreated;isOutput=true]$kubernetesNamespaceWasCreated"
+                serenityHelmChartWasInstalled=`az storage entity query --filter "PartitionKey eq '$(tableStoragePartition)' and RowKey eq '$(tableStorageRowKeyPrefix)$(serenityHelmChartWasInstalledRowKey)'" --select Content --query items[].Content --output tsv --table-name $(tableStorageName) --account-name $(storageAccountName)`
+                echo "##vso[task.setvariable variable=serenityHelmChartWasInstalled;isOutput=true]$serenityHelmChartWasInstalled"
+
+      - job: uninstallChart
+        displayName: Uninstall Helm chart
+        dependsOn:
+          - getPipelineVariables
+        condition: and(eq(dependencies.getPipelineVariables.outputs['getPipelineVariables.serenityHelmChartWasInstalled'], 'true'), not(failed()))
+        steps:
+          - checkout: none
+
+          - task: HelmInstaller@1
+            displayName: Install Helm
+            inputs:
+              helmVersionToInstall: $(helmVersion)
+
+          - task: HelmDeploy@0
+            displayName: Uninstall Helm chart
+            inputs:
+              connectionType: Azure Resource Manager
+              azureSubscriptionEndpoint: $(subscriptionName)
+              azureResourceGroup: $(resouceGroupName)
+              kubernetesCluster: $(aksName)
+              useClusterAdmin: false
+              command: delete
+              arguments: --purge $(platformHelmChartReleaseName)
+
+      - job: deleteNamespace
+        displayName: Delete namespace
+        dependsOn:
+          - getPipelineVariables
+        condition: and(eq(dependencies.getPipelineVariables.outputs['getPipelineVariables.kubernetesNamespaceWasCreated'], 'true'), not(failed()))
+        steps:
+          - checkout: none
+
+          - task: Kubernetes@1
+            displayName: Delete namespace
+            inputs:
+              connectionType: Azure Resource Manager
+              azureSubscriptionEndpoint: $(subscriptionName)
+              azureResourceGroup: $(resouceGroupName)
+              kubernetesCluster: $(aksName)
+              command: delete
+              arguments: namespace $(kubernetesNamespace) --now=true --ignore-not-found=true

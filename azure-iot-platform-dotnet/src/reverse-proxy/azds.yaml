@@ -1,0 +1,44 @@
+kind: helm-release
+apiVersion: 1.1
+build:
+  context: .
+  dockerfile: Dockerfile
+install:
+  chart: charts/nginx
+  values:
+  - values.dev.yaml?
+  - secrets.dev.yaml?
+  set:
+    replicaCount: 1
+    image:
+      repository: reverse-proxy
+      tag: $(tag)
+      pullPolicy: Never
+    ingress:
+      annotations:
+        kubernetes.io/ingress.class: traefik-azds
+      hosts:
+      # This expands to form the service's public URL: [space.s.][rootSpace.]reverse-proxy.<random suffix>.<region>.azds.io
+      # Customize the public URL by changing the 'reverse-proxy' text between the $(rootSpacePrefix) and $(hostSuffix) tokens
+      # For more information see https://aka.ms/devspaces/routing
+      - $(spacePrefix)$(rootSpacePrefix)reverse-proxy$(hostSuffix)
+      # - aziotplatform3m.centralus.cloudapp.azure.com
+      tls: 
+        #- hosts:
+            # - aziotplatform3m.centralus.cloudapp.azure.com
+        #    - $(spacePrefix)$(rootSpacePrefix)reverse-proxy$(hostSuffix)
+        #  secretName: tls-$(spacePrefix)
+    service:
+      type: ClusterIP
+      internalPort: 10080
+      externalPort: 10080
+      internalHttpsPort: 443
+      externalHttpsPort: 443
+    secrets:
+      letsencrypt:
+        ALLOWED_DOMAINS: azds.io
+        SITES: "*.azds.io"
+configurations:
+  develop:
+    build:
+      useGitIgnore: true

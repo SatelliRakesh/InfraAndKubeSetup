@@ -1,0 +1,44 @@
+digraph {
+    node[shape=box,style=rounded]
+    start[shape=point]
+    main[label="Program.Main"]
+    start -> main
+    newConfigData[label="Create a new\nConfigData object"]
+    main -> newConfigData
+    ifDebug[label="If DEBUG",shape=diamond]
+    newConfigData -> ifDebug
+    loadIni[label="Upsert configuration\nkey-value pairs\nfrom INI file",color=red]
+    ifDebug -> loadIni[label="Yes"]
+    loadEnv[label="Upsert configuration\nkey-value pairs\nfrom environment variables",color=red]
+    loadIni -> loadEnv
+    ifDebug -> loadEnv[label="No"]
+    buildConfig1[label="Build a temporary\nIConfiguration object"]
+    loadEnv ->  buildConfig1
+    getAzAppConfigCs[label="Get the Azure App Configuration\nconnection string from\ntemporary IConfiguration object"]
+    buildConfig1 -> getAzAppConfigCs
+    loadAzAppConfig[label="Upsert configuration\nkey-value pairs from\nAzure App Configuration",color=red]
+    getAzAppConfigCs -> loadAzAppConfig
+    buildConfig2[label="Build a second IConfiguration\nobject and save it\nin the ConfigData object"]
+    loadAzAppConfig -> buildConfig2
+    newConfig[label="Create a new\nConfig object with the\nConfigData as a parameter.\nSet Port, ServicesConfig, and\nAuthConfig properties by\nlooking them up in IConfigData"][xlabel="IConfigData lookups call Azure Key Vault\nif configuration value not found"]
+    hostOrAppConfig[label="Host or App\nis being configured?",shape=diamond]
+    buildConfig2 -> newConfig
+    backToMain[label="Return control to\nProgram.Main"]
+    newConfig -> hostOrAppConfig
+    hostOrAppConfig -> backToMain[label="Host"]
+    configure[label="Startup.Configure"]
+    hostOrAppConfig -> configure[label="App"]
+    run[label="Run the host\n(startup is done)"]
+    configure -> run
+    end[shape=point]
+    run -> end
+    setPort[label="Configure Kestrel to run\non port number specified by\nvalue in Config object"]
+    backToMain -> setPort
+    startup[label="Pass control to Startup\nconstructor"]
+    setPort -> startup
+    configureServices[label="Startup.ConfigureServices"]
+    startup -> configureServices
+    diContainer[label="DependencyResolution.Setup"]
+    configureServices -> diContainer
+    diContainer -> newConfigData[label="Registers implementations of\nIServicesConfig and IAuthConfig"]
+}

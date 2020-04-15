@@ -1,0 +1,40 @@
+digraph {
+    node[shape=box,style=rounded]
+    start[shape=point]
+    main[label="Program.Main"]
+    start -> main
+    hostOrAppConfig[label="Host or App\nis being configured?",shape=diamond]
+    main -> hostOrAppConfig
+    hostOrAppConfig -> loadEnv[label="Host"]
+    loadEnv[label="Initialize Host configuration\nkey-value pairs\nfrom environment variables",color=red]
+    loadArgs[label="Upsert Host configuration\nkey-value pairs\nfrom command-line arguments",color=red]
+    loadEnv -> loadArgs
+    setPort[label="Configure Kestrel to run\non port number specified by\nASPNETCORE_URLS configuration"]
+    loadArgs -> setPort
+
+    setPort -> main
+    ifNotProd[label="If ASPNETCORE_ENVIRONMENT\nis 'dev' or 'qa'",shape=diamond]
+    hostOrAppConfig -> ifNotProd[label="App"]
+    loadUserSecrets[label="Initialize configuration\nkey-value pairs from\nUser Secrets",color=red]
+    ifNotProd -> loadUserSecrets[label="Yes"]
+    loadEnv2[label="Initialize/upsert configuration\nkey-value pairs\nfrom environment variables",color=red]
+    ifNotProd -> loadEnv2[label="No"]
+    loadUserSecrets -> loadEnv2
+    loadArgs2[label="Upsert configuration\nkey-value pairs from\ncommand-line arguments",color=red]
+    loadEnv2 -> loadArgs2
+    buildConfig1[label="Build a FIRST temporary\nIConfiguration object from\nUser Secrets, ENV, and args"]
+    loadArgs2 -> buildConfig1
+    getAzAppConfigCs[label="Get the Azure App Configuration\nconnection string from the FIRST\ntemporary IConfiguration object"]
+    buildConfig1 -> getAzAppConfigCs
+    loadAzAppConfig[label="Initialize App configuration\nkey-value pairs from\nAzure App Configuration",color=red]
+    getAzAppConfigCs -> loadAzAppConfig
+    buildConfig2[label="Build a second temporary\nIConfiguration object from\nAzure App Configuration"]
+    loadAzAppConfig -> buildConfig2
+    getAzKeyVaultCs[label="Get the Azure Key Vault\nconnection parameters from the\nsecond temporary\nIConfiguration object"]
+    buildConfig2 -> getAzKeyVaultCs
+    loadAzKeyVault[label="Upsert App configuration\nkey-value pairs from\nAzure Key Vault",color=red]
+    getAzKeyVaultCs -> loadAzKeyVault
+    applyFirstTempConfig[label="Upsert App configuration\nkey-value pairs from\nFIRST temporary configuration object"]
+    loadAzKeyVault -> applyFirstTempConfig
+    applyFirstTempConfig -> main
+}

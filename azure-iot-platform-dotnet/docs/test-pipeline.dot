@@ -1,0 +1,22 @@
+digraph {
+    node[shape=record]
+    start[shape=circle,label="Start"]
+    buildStage[label="Builds all C# code\nPublish output as pipeline aftifact"]
+    start -> buildStage
+    buildFrontEndContainersStage[label="Build reverse-proxy and\nwebui container images\nTag with build number\nPush to DockerHub"]
+    start -> buildFrontEndContainersStage
+    unitTestStage[label="Run C# unit tests\nPublish results and coverage\nas pipeline artifacts"]
+    buildStage -> unitTestStage
+    buildServiceContainersStage[label="Build C# service container images\nTag with build number\nPush to DockerHub"]
+    buildStage -> buildServiceContainersStage
+    deployStage[label="Create K8s namespace for build\nInstall Serenity Helm chart\nWait for all services to be ready"]
+    buildServiceContainersStage, buildFrontEndContainersStage -> deployStage
+    integrationTestStage[label="Run integration tests\nPublish results\nas pipeline artifacts"]
+    deployStage -> integrationTestStage
+    applyLatestTagStage[label="Tag all container images\nas 'latest'\n* All prior stages must have succeeded\n* Master branch only"]
+    integrationTestStage, unitTestStage -> applyLatestTagStage
+    cleanupStage[label="Delete K8s namespace\n(deletes all resources)"]
+    integrationTestStage -> cleanupStage
+    end[shape=circle,label="End"]
+    cleanupStage, applyLatestTagStage -> end
+}
